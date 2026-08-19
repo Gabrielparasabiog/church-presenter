@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Church Presenter">
+  <rect width="512" height="512" fill="#063f32"/>
+  <circle cx="256" cy="256" r="190" fill="#0a5c47"/>
+  <path d="M256 108v242M170 190h172" stroke="#e2b84b" stroke-width="34" stroke-linecap="round"/>
+  <path d="M120 390c42-35 87-52 136-52s94 17 136 52" fill="none" stroke="#f7f2e7" stroke-width="26" stroke-linecap="round"/>
+</svg>
