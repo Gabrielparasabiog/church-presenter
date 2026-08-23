@@ -6,6 +6,7 @@ import {
   mergeWithNext,
   moveSlide,
   navigationIndex,
+  MAX_LINE_LENGTH,
   splitLyrics,
   splitSlide,
   updateSlideLines,
@@ -36,8 +37,9 @@ describe('lyrics splitting', () => {
   });
 
   it('retains a very long source line for font fitting in the view', () => {
-    const longLine = 'Pag-ibig '.repeat(400);
-    expect(splitLyrics(longLine, ids('a'))[0]?.lines[0]).toBe(longLine.trim());
+    const longLine = 'Pag-ibig '.repeat(1_000);
+    expect(splitLyrics(longLine, ids('a'))[0]?.lines[0]).toBe(longLine.trim().slice(0, MAX_LINE_LENGTH));
+    expect(splitLyrics(longLine, ids('a'))[0]?.lines[0]).toHaveLength(MAX_LINE_LENGTH);
   });
 });
 

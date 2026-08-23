@@ -10,7 +10,7 @@ export function normalizeLyricLines(source: string): string[] {
   return source
     .replace(/\r\n?/g, '\n')
     .split('\n')
-    .map((line) => line.trim())
+    .map((line) => line.trim().slice(0, MAX_LINE_LENGTH))
     .filter(Boolean);
 }
 

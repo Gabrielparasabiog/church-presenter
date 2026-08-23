@@ -11,7 +11,7 @@ const icon = (name: 'home' | 'timer' | 'lyrics'): string => {
   return `<svg aria-hidden="true" viewBox="0 0 24 24">${paths[name]}</svg>`;
 };
 
-export function pageShell(title: string, eyebrow: string, content: string, active?: 'timer' | 'lyrics'): string {
+export function pageShell(title: string, eyebrow: string, content: string, active: 'home' | 'timer' | 'lyrics' = 'home'): string {
   return `
     <div class="app-shell">
       <header class="site-header">
@@ -20,9 +20,9 @@ export function pageShell(title: string, eyebrow: string, content: string, activ
           <span><strong>Church Presenter</strong><small>Prepared with purpose</small></span>
         </a>
         <nav aria-label="Primary navigation">
-          <a href="#/" class="nav-link">${icon('home')}<span>Home</span></a>
-          <a href="#/timer" class="nav-link ${active === 'timer' ? 'is-active' : ''}">${icon('timer')}<span>Timer</span></a>
-          <a href="#/lyrics" class="nav-link ${active === 'lyrics' ? 'is-active' : ''}">${icon('lyrics')}<span>Lyrics</span></a>
+          <a href="#/" class="nav-link ${active === 'home' ? 'is-active' : ''}" aria-label="Home" ${active === 'home' ? 'aria-current="page"' : ''}>${icon('home')}<span>Home</span></a>
+          <a href="#/timer" class="nav-link ${active === 'timer' ? 'is-active' : ''}" aria-label="Timer" ${active === 'timer' ? 'aria-current="page"' : ''}>${icon('timer')}<span>Timer</span></a>
+          <a href="#/lyrics" class="nav-link ${active === 'lyrics' ? 'is-active' : ''}" aria-label="Lyrics" ${active === 'lyrics' ? 'aria-current="page"' : ''}>${icon('lyrics')}<span>Lyrics</span></a>
         </nav>
       </header>
       <main id="main-content" tabindex="-1">

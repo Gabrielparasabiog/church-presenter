@@ -51,6 +51,24 @@ describe('accessible interactive views', () => {
     cleanup();
   });
 
+  it('supports projector keyboard shortcuts without hijacking duration fields', () => {
+    const root = setupDocument();
+    const cleanup = renderTimerPage(root);
+    const seconds = document.querySelector<HTMLInputElement>('#timer-seconds')!;
+    const primary = document.querySelector<HTMLButtonElement>('#timer-primary')!;
+
+    seconds.focus();
+    seconds.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    expect(primary.textContent).toBe('Start countdown');
+
+    document.body.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    expect(primary.textContent).toBe('Pause');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+    expect(primary.textContent).toBe('Start countdown');
+    cleanup();
+  });
+
   it('generates slides, supports click/tap zones, and isolates presentation mode', () => {
     const root = setupDocument();
     const cleanup = renderLyricsPage(root);
@@ -61,11 +79,19 @@ describe('accessible interactive views', () => {
     expect(document.querySelectorAll('.thumbnail')).toHaveLength(2);
     expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 1 of 2');
     expect(document.querySelectorAll('#editor-slide-copy span')).toHaveLength(2);
+    expect(document.querySelectorAll('#editor-slide-copy span')[0]?.textContent).toBe('Line one');
+    expect(document.querySelectorAll('#editor-slide-copy span')[1]?.textContent).toBe('Line two');
 
     document.querySelector<HTMLButtonElement>('#present-deck')!.click();
     expect(document.body.classList.contains('is-presenting')).toBe(true);
     expect(document.querySelector<HTMLElement>('#presentation-overlay')!.hidden).toBe(false);
     expect(document.querySelector('#presentation-counter')?.textContent).toBe('1 / 2');
+    expect(document.activeElement?.id).toBe('presentation-stage');
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true }));
+    expect(document.querySelector('#presentation-stage')?.classList.contains('is-blank')).toBe(true);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true }));
+    expect(document.querySelector('#presentation-stage')?.classList.contains('is-blank')).toBe(false);
 
     document.querySelector<HTMLButtonElement>('#presentation-next')!.click();
     expect(document.querySelector('#presentation-counter')?.textContent).toBe('2 / 2');

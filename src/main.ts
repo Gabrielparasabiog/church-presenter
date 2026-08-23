@@ -35,16 +35,20 @@ renderRoute();
 
 const updateSW = registerSW({
   onNeedRefresh() {
+    if (document.querySelector('[data-update-toast]')) return;
     const toast = document.createElement('div');
     toast.className = 'update-toast';
+    toast.dataset.updateToast = '';
     toast.setAttribute('role', 'status');
     toast.innerHTML = '<span>A new version is ready.</span><button type="button">Update now</button>';
     toast.querySelector('button')?.addEventListener('click', () => { void updateSW(true); });
     document.body.append(toast);
   },
   onOfflineReady() {
+    if (document.querySelector('[data-offline-toast]')) return;
     const toast = document.createElement('div');
     toast.className = 'update-toast offline-toast';
+    toast.dataset.offlineToast = '';
     toast.setAttribute('role', 'status');
     toast.textContent = 'Church Presenter is ready to use offline.';
     document.body.append(toast);

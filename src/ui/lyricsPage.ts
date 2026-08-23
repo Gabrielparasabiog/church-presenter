@@ -1,23 +1,32 @@
-import { byId, downloadText, enterFullscreen, escapeHtml, exitFullscreen, fitText } from '../core/dom';
+import { byId, downloadText, enterFullscreen, escapeHtml, exitFullscreen, fitText, isEditableTarget } from '../core/dom';
 import {
+  MAX_SLIDES,
   deleteSlide,
   duplicateSlide,
   effectiveTheme,
   mergeWithNext,
   moveSlide,
   navigationIndex,
+  normalizeLyricLines,
   splitLyrics,
   splitSlide,
   updateSlideLines,
 } from '../core/lyrics';
-import { createEmptyDeck, loadDeck, parseDeckImport, saveDeck, serializeDeck } from '../core/storage';
+import { MAX_IMPORT_BYTES, createEmptyDeck, loadDeck, parseDeckImport, saveDeck, serializeDeck } from '../core/storage';
+import { ScreenWakeLock } from '../core/wakeLock';
 import type { LyricDeck, ThemeName } from '../types';
 import { pageShell, themeOptions, type PageCleanup } from './shell';
 
 export function renderLyricsPage(root: HTMLElement): PageCleanup {
   let deck: LyricDeck = loadDeck();
   let isPresenting = false;
-  const fitTimerIds: number[] = [];
+  let isBlanked = false;
+  let fitGeneration = 0;
+  let fitAnimationId = 0;
+  let fitTimerId = 0;
+  let sourceSaveTimerId = 0;
+  let lastFocusedElement: HTMLElement | null = null;
+  const wakeLock = new ScreenWakeLock();
 
   root.innerHTML = pageShell(
     'Lyrics Presenter',
@@ -40,8 +49,8 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
         <aside class="source-panel control-card">
           <div>
             <p class="control-label">1 · Paste complete lyrics</p>
-            <textarea id="lyrics-source" rows="11" placeholder="Paste the complete lyrics here…">${escapeHtml(deck.sourceText)}</textarea>
-            <p class="helper-text">Blank lines are ignored. Every two non-empty lines become one slide.</p>
+            <textarea id="lyrics-source" rows="11" maxlength="${MAX_IMPORT_BYTES}" placeholder="Paste the complete lyrics here…">${escapeHtml(deck.sourceText)}</textarea>
+            <p class="helper-text">Blank lines are ignored. Every two non-empty lines become one slide—strictly two displayed rows, with no lyric-line wrapping.</p>
             <button id="generate-slides" class="button button-primary" type="button">Generate two-line slides</button>
           </div>
           <div class="source-divider"></div>
@@ -88,11 +97,13 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
       <p id="deck-status" class="status-message" role="status" aria-live="polite"></p>
     </section>
     <section id="presentation-overlay" class="presentation-overlay" hidden aria-label="Lyrics presentation">
-      <div id="presentation-stage" class="presentation-stage theme-green">
+      <div id="presentation-stage" class="presentation-stage theme-green" tabindex="-1">
         <button id="presentation-previous" class="presentation-zone previous" type="button" aria-label="Previous slide"></button>
         <div id="presentation-copy" class="presentation-copy"></div>
         <button id="presentation-next" class="presentation-zone next" type="button" aria-label="Next slide"></button>
         <div id="presentation-counter" class="presentation-counter"></div>
+        <p class="presentation-help" aria-hidden="true">← → slides · B blackout · Esc exit</p>
+        <p id="presentation-status" class="sr-only" role="status" aria-live="polite"></p>
         <button id="presentation-exit" class="presentation-exit" type="button" aria-label="Exit presentation">Exit</button>
       </div>
     </section>`,
@@ -119,33 +130,45 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
   const presentationStage = byId<HTMLDivElement>('presentation-stage');
   const presentationCopy = byId<HTMLDivElement>('presentation-copy');
   const presentationCounter = byId<HTMLDivElement>('presentation-counter');
+  const presentationStatus = byId<HTMLParagraphElement>('presentation-status');
 
   const currentSlide = () => deck.slides[deck.currentIndex];
   const fitEditorCopy = (): void => {
     if (!currentSlide()) return;
-    fitText(canvasCopy, 54, 18);
+    fitText(canvasCopy, 54, 8);
   };
   const fitPresentationCopy = (): void => {
     if (!currentSlide()) return;
-    fitText(presentationCopy, 112, 28);
+    fitText(presentationCopy, 112, 16);
   };
   const fitAfterFonts = (fit: () => void): void => {
-    requestAnimationFrame(fit);
-    void document.fonts.ready.then(fit);
-    fitTimerIds.push(window.setTimeout(fit, 180));
+    const generation = ++fitGeneration;
+    window.cancelAnimationFrame(fitAnimationId);
+    window.clearTimeout(fitTimerId);
+    const run = (): void => { if (generation === fitGeneration) fit(); };
+    fitAnimationId = requestAnimationFrame(run);
+    void document.fonts.ready.then(run);
+    fitTimerId = window.setTimeout(run, 180);
   };
   const persist = (): void => {
     deck = { ...deck, updatedAt: new Date().toISOString() };
-    saveDeck(deck);
+    try {
+      saveDeck(deck);
+    } catch {
+      setStatus('This browser could not save the latest change. Export the deck before leaving this page.');
+    }
   };
   const setStatus = (message: string): void => { status.textContent = message; };
 
   const renderPresentation = (): void => {
     const slide = currentSlide();
     if (!slide) return;
-    presentationStage.className = `presentation-stage theme-${effectiveTheme(slide, deck.defaultTheme)}`;
+    presentationStage.className = `presentation-stage theme-${effectiveTheme(slide, deck.defaultTheme)}${isBlanked ? ' is-blank' : ''}`;
     presentationCopy.innerHTML = slide.lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('');
     presentationCounter.textContent = `${deck.currentIndex + 1} / ${deck.slides.length}`;
+    presentationStatus.textContent = isBlanked
+      ? 'Projection is blacked out.'
+      : `Slide ${deck.currentIndex + 1} of ${deck.slides.length}: ${slide.lines.join('. ')}`;
     fitAfterFonts(fitPresentationCopy);
   };
 
@@ -179,7 +202,7 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     thumbnails.innerHTML = deck.slides.map((item, index) => `
       <button class="thumbnail ${index === deck.currentIndex ? 'is-selected' : ''} theme-${effectiveTheme(item, deck.defaultTheme)}" type="button" role="option" aria-selected="${index === deck.currentIndex}" data-slide-index="${index}">
         <span class="thumbnail-number">${index + 1}</span>
-        <span class="thumbnail-copy">${item.lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('')}</span>
+        <span class="thumbnail-copy">${item.lines.map((line) => `<span title="${escapeHtml(line)}">${escapeHtml(line)}</span>`).join('')}</span>
       </button>`).join('');
     if (isPresenting) renderPresentation();
   };
@@ -190,10 +213,14 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     if (target) selectSlide(Number(target.dataset.slideIndex));
   };
   const onGenerate = (): void => {
+    window.clearTimeout(sourceSaveTimerId);
     const slides = splitLyrics(source.value);
     deck = { ...deck, sourceText: source.value, slides, currentIndex: 0 };
     persist();
-    setStatus(slides.length ? `${slides.length} slides generated and saved in this browser.` : 'Add at least one non-empty lyric line.');
+    const wasLimited = normalizeLyricLines(source.value).length > MAX_SLIDES * 2;
+    setStatus(slides.length
+      ? `${slides.length} strictly two-line slides generated and saved in this browser.${wasLimited ? ` Only the first ${MAX_SLIDES} slides were included.` : ''}`
+      : 'Add at least one non-empty lyric line.');
     render();
   };
   const updateCurrent = (): void => {
@@ -204,17 +231,24 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
   };
   const startPresentation = (): void => {
     if (!deck.slides.length) return;
+    lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : present;
     isPresenting = true;
+    isBlanked = false;
     overlay.hidden = false;
     document.body.classList.add('is-presenting');
     renderPresentation();
+    presentationStage.focus();
+    void wakeLock.start();
     void enterFullscreen(overlay).catch(() => undefined);
   };
   const stopPresentation = (): void => {
     isPresenting = false;
+    isBlanked = false;
     overlay.hidden = true;
     document.body.classList.remove('is-presenting');
+    void wakeLock.stop();
     void exitFullscreen().catch(() => undefined);
+    window.setTimeout(() => lastFocusedElement?.focus(), 0);
   };
   const navigate = (key: string): void => {
     const next = navigationIndex(key, deck.currentIndex, deck.slides.length);
@@ -222,10 +256,20 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
   };
   const onKeyDown = (event: KeyboardEvent): void => {
     if (!isPresenting) return;
+    if (event.key === 'Escape') {
+      if (!document.fullscreenElement) stopPresentation();
+      return;
+    }
+    if (isEditableTarget(event.target)) return;
+    if (event.key.toLowerCase() === 'b') {
+      event.preventDefault();
+      isBlanked = !isBlanked;
+      renderPresentation();
+      return;
+    }
     if (['ArrowRight', 'ArrowLeft', ' ', 'PageDown', 'PageUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault(); navigate(event.key);
     }
-    if (event.key === 'Escape' && !document.fullscreenElement) stopPresentation();
   };
   const onFullscreenChange = (): void => {
     if (isPresenting && !document.fullscreenElement) stopPresentation();
@@ -234,11 +278,18 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     if (isPresenting) fitPresentationCopy();
     else fitEditorCopy();
   };
+  const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onResize);
+  resizeObserver?.observe(canvas);
+  resizeObserver?.observe(presentationStage);
 
   generate.addEventListener('click', onGenerate);
   thumbnails.addEventListener('click', onThumbnail);
   title.addEventListener('input', () => { deck.title = title.value; persist(); });
-  source.addEventListener('input', () => { deck.sourceText = source.value; persist(); });
+  source.addEventListener('input', () => {
+    deck.sourceText = source.value;
+    window.clearTimeout(sourceSaveTimerId);
+    sourceSaveTimerId = window.setTimeout(persist, 250);
+  });
   deckTheme.addEventListener('change', () => { deck.defaultTheme = deckTheme.value as ThemeName; persist(); render(); });
   lineOne.addEventListener('input', updateCurrent);
   lineTwo.addEventListener('input', updateCurrent);
@@ -252,14 +303,26 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
   byId<HTMLButtonElement>('slide-duplicate').addEventListener('click', () => { deck.slides = duplicateSlide(deck.slides, deck.currentIndex); deck.currentIndex++; persist(); render(); });
   byId<HTMLButtonElement>('slide-split').addEventListener('click', () => { deck.slides = splitSlide(deck.slides, deck.currentIndex); persist(); render(); });
   byId<HTMLButtonElement>('slide-merge').addEventListener('click', () => { deck.slides = mergeWithNext(deck.slides, deck.currentIndex); persist(); render(); });
-  byId<HTMLButtonElement>('slide-delete').addEventListener('click', () => { deck.slides = deleteSlide(deck.slides, deck.currentIndex); persist(); render(); });
-  byId<HTMLButtonElement>('deck-new').addEventListener('click', () => { deck = createEmptyDeck(); source.value = ''; persist(); setStatus('A new blank deck is ready.'); render(); });
-  byId<HTMLButtonElement>('deck-clear').addEventListener('click', () => { deck.slides = []; deck.currentIndex = 0; persist(); setStatus('Slides cleared. Your pasted lyrics remain available.'); render(); });
+  byId<HTMLButtonElement>('slide-delete').addEventListener('click', () => {
+    if (!window.confirm('Delete this slide?')) return;
+    deck.slides = deleteSlide(deck.slides, deck.currentIndex); persist(); render();
+  });
+  byId<HTMLButtonElement>('deck-new').addEventListener('click', () => {
+    if ((deck.slides.length || deck.sourceText.trim()) && !window.confirm('Start a new deck? Export first if you want to keep this one.')) return;
+    deck = createEmptyDeck(); source.value = ''; persist(); setStatus('A new blank deck is ready.'); render();
+  });
+  byId<HTMLButtonElement>('deck-clear').addEventListener('click', () => {
+    if (deck.slides.length && !window.confirm('Clear all generated slides? Your pasted lyrics will remain.')) return;
+    deck.slides = []; deck.currentIndex = 0; persist(); setStatus('Slides cleared. Your pasted lyrics remain available.'); render();
+  });
   byId<HTMLButtonElement>('deck-export').addEventListener('click', () => { downloadText(`${deck.title.trim().replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'lyrics'}.church-presenter.json`, serializeDeck(deck)); setStatus('Deck exported.'); });
   byId<HTMLInputElement>('deck-import').addEventListener('change', async (event) => {
     const input = event.currentTarget as HTMLInputElement;
     const file = input.files?.[0]; if (!file) return;
-    try { const imported = parseDeckImport(await file.text()); deck = imported; source.value = deck.sourceText; persist(); render(); setStatus('Deck imported and saved.'); }
+    try {
+      if (file.size > MAX_IMPORT_BYTES) throw new Error('This file is larger than the 2 MB import limit.');
+      const imported = parseDeckImport(await file.text()); deck = imported; source.value = deck.sourceText; persist(); render(); setStatus('Deck imported and saved.');
+    }
     catch (error) { setStatus(error instanceof Error ? error.message : 'The deck could not be imported.'); }
     input.value = '';
   });
@@ -277,7 +340,14 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     document.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('fullscreenchange', onFullscreenChange);
     window.removeEventListener('resize', onResize);
-    fitTimerIds.forEach((timerId) => window.clearTimeout(timerId));
+    resizeObserver?.disconnect();
+    ++fitGeneration;
+    window.cancelAnimationFrame(fitAnimationId);
+    window.clearTimeout(fitTimerId);
+    window.clearTimeout(sourceSaveTimerId);
+    if (deck.sourceText !== source.value) deck.sourceText = source.value;
+    try { saveDeck({ ...deck, updatedAt: new Date().toISOString() }); } catch { /* Best effort during route teardown. */ }
+    wakeLock.destroy();
     document.body.classList.remove('is-presenting');
   };
 }

@@ -38,13 +38,20 @@ function isSlide(value: unknown): value is LyricSlide {
 export function isDeck(value: unknown): value is LyricDeck {
   if (!value || typeof value !== 'object') return false;
   const deck = value as Partial<LyricDeck>;
+  const slidesAreValid = Array.isArray(deck.slides) &&
+    deck.slides.length <= MAX_SLIDES &&
+    deck.slides.every(isSlide) &&
+    new Set(deck.slides.map((slide) => slide.id)).size === deck.slides.length;
+  const currentIndexIsValid = Number.isInteger(deck.currentIndex) &&
+    Number(deck.currentIndex) >= 0 &&
+    Number(deck.currentIndex) <= (Array.isArray(deck.slides) ? Math.max(0, deck.slides.length - 1) : 0);
   return (
     deck.version === 1 &&
     typeof deck.title === 'string' && deck.title.length <= 200 &&
     typeof deck.sourceText === 'string' && deck.sourceText.length <= MAX_IMPORT_BYTES &&
     isTheme(deck.defaultTheme) &&
-    Array.isArray(deck.slides) && deck.slides.length <= MAX_SLIDES && deck.slides.every(isSlide) &&
-    Number.isInteger(deck.currentIndex) && Number(deck.currentIndex) >= 0 &&
+    slidesAreValid &&
+    currentIndexIsValid &&
     typeof deck.updatedAt === 'string' && !Number.isNaN(Date.parse(deck.updatedAt))
   );
 }

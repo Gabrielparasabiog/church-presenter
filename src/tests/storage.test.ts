@@ -41,4 +41,13 @@ describe('validated deck import/export', () => {
     expect(() => parseDeckImport(JSON.stringify({ format: 'church-presenter', version: 1, deck: {} }))).toThrow('incomplete');
     expect(() => parseDeckImport(' '.repeat(MAX_IMPORT_BYTES + 1))).toThrow('2 MB');
   });
+
+  it('rejects duplicate slide IDs and impossible selected positions', () => {
+    const deck = { ...createEmptyDeck(new Date('2026-01-01T00:00:00Z')), slides: splitLyrics('A\nB\nC') };
+    const duplicateIds = { ...deck, slides: deck.slides.map((slide) => ({ ...slide, id: deck.slides[0]!.id })) };
+    const invalidPosition = { ...deck, currentIndex: 99 };
+    const wrap = (value: unknown) => JSON.stringify({ format: 'church-presenter', version: 1, deck: value });
+    expect(() => parseDeckImport(wrap(duplicateIds))).toThrow('incomplete');
+    expect(() => parseDeckImport(wrap(invalidPosition))).toThrow('incomplete');
+  });
 });
