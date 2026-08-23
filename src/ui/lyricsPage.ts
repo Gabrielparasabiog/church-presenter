@@ -239,7 +239,9 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     renderPresentation();
     presentationStage.focus();
     void wakeLock.start();
-    void enterFullscreen(overlay).catch(() => undefined);
+    void enterFullscreen(overlay)
+      .then(() => fitAfterFonts(fitPresentationCopy))
+      .catch(() => fitAfterFonts(fitPresentationCopy));
   };
   const stopPresentation = (): void => {
     isPresenting = false;
@@ -273,6 +275,7 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
   };
   const onFullscreenChange = (): void => {
     if (isPresenting && !document.fullscreenElement) stopPresentation();
+    else if (isPresenting) fitAfterFonts(fitPresentationCopy);
   };
   const onResize = (): void => {
     if (isPresenting) fitPresentationCopy();
