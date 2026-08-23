@@ -47,8 +47,21 @@ export function fitText(element: HTMLElement, maxPx = 92, minPx = 24): void {
   const computedLineHeight = Number.parseFloat(styles.lineHeight);
   const lineHeightRatio = Number.isFinite(computedLineHeight) ? computedLineHeight / currentFontSize : 1.15;
   const heightLimit = availableHeight / (lines.length * Math.max(1, lineHeightRatio));
-  const best = Math.max(minPx, Math.min(maxPx, Math.floor(widthLimit), Math.floor(heightLimit)));
+  let best = Math.max(minPx, Math.min(maxPx, Math.floor(widthLimit), Math.floor(heightLimit)));
   element.style.fontSize = `${best}px`;
+
+  // Canvas metrics can differ slightly from the browser's final shaped text,
+  // especially after a responsive resize. Use the rendered rows as the final
+  // authority so a lyric remains one complete, unclipped row.
+  const renderedOverflow = Array.from(element.children, (child) => {
+    const row = child as HTMLElement;
+    return row.clientWidth > 0 ? row.scrollWidth / row.clientWidth : 1;
+  });
+  const overflowRatio = Math.max(1, ...renderedOverflow);
+  if (overflowRatio > 1.001) {
+    best = Math.max(minPx, Math.floor(best / overflowRatio));
+    element.style.fontSize = `${best}px`;
+  }
 }
 
 export function downloadText(filename: string, contents: string): void {
