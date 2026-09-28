@@ -69,7 +69,7 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
             <div id="editor-slide-copy" class="slide-copy"></div>
             <p id="empty-slide-message" class="empty-slide-message">Paste lyrics and generate your first deck.</p>
           </div>
-          <div class="thumbnail-header"><span>Slides</span><span>Double-click the large slide to present</span></div>
+          <div class="thumbnail-header"><span>Slides</span><span>← / → change slide · Double-click to present</span></div>
           <div id="thumbnail-strip" class="thumbnail-strip" role="listbox" aria-label="Lyric slides"></div>
         </section>
 
@@ -207,10 +207,18 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     if (isPresenting) renderPresentation();
   };
 
-  const selectSlide = (index: number): void => { deck.currentIndex = index; persist(); render(); };
+  const selectSlide = (index: number, focusThumbnail = false): void => {
+    if (index < 0 || index >= deck.slides.length || index === deck.currentIndex) return;
+    deck.currentIndex = index;
+    persist();
+    render();
+    const selectedThumbnail = thumbnails.querySelector<HTMLButtonElement>('[aria-selected="true"]');
+    selectedThumbnail?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    if (focusThumbnail) selectedThumbnail?.focus();
+  };
   const onThumbnail = (event: Event): void => {
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-slide-index]');
-    if (target) selectSlide(Number(target.dataset.slideIndex));
+    if (target) selectSlide(Number(target.dataset.slideIndex), true);
   };
   const onGenerate = (): void => {
     window.clearTimeout(sourceSaveTimerId);
@@ -257,7 +265,18 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     if (next !== deck.currentIndex) { deck.currentIndex = next; persist(); renderPresentation(); }
   };
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (!isPresenting) return;
+    if (!isPresenting) {
+      if (!['ArrowRight', 'ArrowLeft'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const focusedThumbnail = target?.closest<HTMLButtonElement>('[data-slide-index]') ?? null;
+      const isThumbnailFocused = Boolean(focusedThumbnail && thumbnails.contains(focusedThumbnail));
+      if ((isEditableTarget(target) && !isThumbnailFocused) || deck.slides.length === 0) return;
+
+      event.preventDefault();
+      const next = navigationIndex(event.key, deck.currentIndex, deck.slides.length);
+      if (next !== deck.currentIndex) selectSlide(next, isThumbnailFocused);
+      return;
+    }
     if (event.key === 'Escape') {
       if (!document.fullscreenElement) stopPresentation();
       return;

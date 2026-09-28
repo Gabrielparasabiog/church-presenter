@@ -109,6 +109,101 @@ describe('accessible interactive views', () => {
     cleanup();
   });
 
+  it('navigates slides when the editor page has focus without intercepting form controls', () => {
+    const root = setupDocument();
+    const cleanup = renderLyricsPage(root);
+    const source = document.querySelector<HTMLTextAreaElement>('#lyrics-source')!;
+    source.value = 'First line\nSecond line\nThird line\nFourth line';
+    document.querySelector<HTMLButtonElement>('#generate-slides')!.click();
+
+    const pageArrow = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(pageArrow);
+    expect(pageArrow.defaultPrevented).toBe(true);
+    expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 2 of 2');
+    expect(document.querySelector('#editor-slide-copy')?.textContent).toContain('Third line');
+
+    const textFieldArrow = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+    source.dispatchEvent(textFieldArrow);
+    expect(textFieldArrow.defaultPrevented).toBe(false);
+    expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 2 of 2');
+    cleanup();
+  });
+
+  it('navigates editor slides with arrow keys and leaves text fields alone', () => {
+    const root = setupDocument();
+    const cleanup = renderLyricsPage(root);
+    const source = document.querySelector<HTMLTextAreaElement>('#lyrics-source')!;
+    source.value = 'Line one\nLine two\nLine three\nLine four\nLine five\nLine six';
+    document.querySelector<HTMLButtonElement>('#generate-slides')!.click();
+    const originalSlides = JSON.parse(localStorage.getItem(DECK_STORAGE_KEY)!).slides;
+
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const canvas = document.querySelector<HTMLElement>('#editor-canvas')!;
+      canvas.focus();
+      const canvasArrow = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+      canvas.dispatchEvent(canvasArrow);
+
+      expect(canvasArrow.defaultPrevented).toBe(true);
+      expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 2 of 3');
+      expect(document.querySelector('#editor-slide-copy')?.textContent).toContain('Line three');
+      expect(document.querySelector<HTMLTextAreaElement>('#slide-line-one')?.value).toBe('Line three');
+      expect(document.querySelectorAll<HTMLButtonElement>('.thumbnail')[1]?.getAttribute('aria-selected')).toBe('true');
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+
+      const selectedThumbnail = document.querySelector<HTMLButtonElement>('.thumbnail[aria-selected="true"]')!;
+      selectedThumbnail.focus();
+      selectedThumbnail.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+      expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 3 of 3');
+      expect(document.activeElement).toBe(document.querySelector('.thumbnail[aria-selected="true"]'));
+
+      const lastThumbnail = document.querySelector<HTMLButtonElement>('.thumbnail[aria-selected="true"]')!;
+      const boundaryArrow = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+      lastThumbnail.dispatchEvent(boundaryArrow);
+      expect(boundaryArrow.defaultPrevented).toBe(true);
+      expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 3 of 3');
+
+      const previousThumbnail = document.querySelector<HTMLButtonElement>('.thumbnail[aria-selected="true"]')!;
+      previousThumbnail.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+      expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 2 of 3');
+      canvas.focus();
+      const firstSlideArrow = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+      canvas.dispatchEvent(firstSlideArrow);
+      expect(firstSlideArrow.defaultPrevented).toBe(true);
+      expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 1 of 3');
+      const firstBoundaryArrow = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+      canvas.dispatchEvent(firstBoundaryArrow);
+      expect(firstBoundaryArrow.defaultPrevented).toBe(true);
+      expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 1 of 3');
+      expect(JSON.parse(localStorage.getItem(DECK_STORAGE_KEY)!).slides).toEqual(originalSlides);
+
+      const slideText = document.querySelector<HTMLTextAreaElement>('#slide-line-one')!;
+      slideText.focus();
+      const typingArrow = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+      slideText.dispatchEvent(typingArrow);
+      expect(typingArrow.defaultPrevented).toBe(false);
+      expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 1 of 3');
+
+      source.focus();
+      const sourceArrow = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+      source.dispatchEvent(sourceArrow);
+      expect(sourceArrow.defaultPrevented).toBe(false);
+      expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 1 of 3');
+
+      const deckTitle = document.querySelector<HTMLInputElement>('#deck-title')!;
+      deckTitle.focus();
+      const titleArrow = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+      deckTitle.dispatchEvent(titleArrow);
+      expect(titleArrow.defaultPrevented).toBe(false);
+      expect(document.querySelector('#slide-position')?.textContent).toBe('Slide 1 of 3');
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      cleanup();
+    }
+  });
+
   it('restores the saved deck and selected position on a new render', () => {
     const root = setupDocument();
     const cleanupFirst = renderLyricsPage(root);
