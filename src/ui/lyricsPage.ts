@@ -11,6 +11,7 @@ import {
   splitLyrics,
   splitSlide,
   updateSlideLines,
+  wrapLyricLines,
 } from '../core/lyrics';
 import { MAX_IMPORT_BYTES, createEmptyDeck, loadDeck, parseDeckImport, saveDeck, serializeDeck } from '../core/storage';
 import { ScreenWakeLock } from '../core/wakeLock';
@@ -50,7 +51,7 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
           <div>
             <p class="control-label">1 · Paste complete lyrics</p>
             <textarea id="lyrics-source" rows="11" maxlength="${MAX_IMPORT_BYTES}" placeholder="Paste the complete lyrics here…">${escapeHtml(deck.sourceText)}</textarea>
-            <p class="helper-text">Blank lines are ignored. Every two non-empty lines become one slide—strictly two displayed rows, with no lyric-line wrapping.</p>
+            <p class="helper-text">Blank lines are ignored. Up to two rows appear per slide; extra-long lines split at spaces across additional slides to stay readable.</p>
             <button id="generate-slides" class="button button-primary" type="button">Generate two-line slides</button>
           </div>
           <div class="source-divider"></div>
@@ -141,6 +142,20 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     if (!currentSlide()) return;
     fitText(presentationCopy, 112, 16);
   };
+  const getLyricsWrapMetrics = (): { maxWidth: number; measureText: (text: string) => number } | null => {
+    const canvasWidth = canvas.clientWidth || canvas.getBoundingClientRect().width || Math.max(320, window.innerWidth - 48);
+    const maxWidth = canvasWidth * 0.86 - 32;
+    if (maxWidth <= 0) return null;
+
+    const fontSize = 54;
+    const styles = window.getComputedStyle(canvasCopy);
+    const context = document.createElement('canvas').getContext('2d');
+    if (context) {
+      context.font = `${styles.fontStyle} ${styles.fontWeight} ${fontSize}px ${styles.fontFamily}`;
+      return { maxWidth, measureText: (text) => context.measureText(text).width };
+    }
+    return { maxWidth, measureText: (text) => text.length * fontSize * 0.58 };
+  };
   const fitAfterFonts = (fit: () => void): void => {
     const generation = ++fitGeneration;
     window.cancelAnimationFrame(fitAnimationId);
@@ -222,12 +237,37 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
   };
   const onGenerate = (): void => {
     window.clearTimeout(sourceSaveTimerId);
-    const slides = splitLyrics(source.value);
-    deck = { ...deck, sourceText: source.value, slides, currentIndex: 0 };
+    const sourceLines = normalizeLyricLines(source.value);
+    deck = { ...deck, sourceText: source.value };
+    if (!sourceLines.length) {
+      deck = { ...deck, slides: [], currentIndex: 0 };
+      persist();
+      setStatus('Add at least one non-empty lyric line.');
+      render();
+      return;
+    }
+
+    const metrics = getLyricsWrapMetrics();
+    if (!metrics) {
+      persist();
+      setStatus('The slide preview is not ready yet. Try generating the slides again.');
+      return;
+    }
+
+    const wrapped = wrapLyricLines(sourceLines, metrics.maxWidth, metrics.measureText);
+    if (wrapped.unbreakableWordCount) {
+      persist();
+      setStatus(`${wrapped.unbreakableWordCount} long unspaced word(s) cannot fit safely. Add spaces or line breaks; your pasted lyrics are preserved and the current slides were not changed.`);
+      return;
+    }
+
+    const slides = splitLyrics(wrapped.lines.join('\n'));
+    deck = { ...deck, slides, currentIndex: 0 };
     persist();
-    const wasLimited = normalizeLyricLines(source.value).length > MAX_SLIDES * 2;
+    const wasLimited = wrapped.lines.length > MAX_SLIDES * 2;
+    const wasWrapped = wrapped.lines.length > sourceLines.length;
     setStatus(slides.length
-      ? `${slides.length} strictly two-line slides generated and saved in this browser.${wasLimited ? ` Only the first ${MAX_SLIDES} slides were included.` : ''}`
+      ? `${slides.length} slides generated and saved in this browser.${wasWrapped ? ' Long lines were split at word boundaries to stay readable.' : ''}${wasLimited ? ` Only the first ${MAX_SLIDES} slides were included.` : ''}`
       : 'Add at least one non-empty lyric line.');
     render();
   };

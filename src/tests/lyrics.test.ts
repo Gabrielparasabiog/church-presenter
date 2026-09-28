@@ -7,9 +7,12 @@ import {
   moveSlide,
   navigationIndex,
   MAX_LINE_LENGTH,
+  MAX_SLIDES,
+  normalizeLyricLines,
   splitLyrics,
   splitSlide,
   updateSlideLines,
+  wrapLyricLines,
 } from '../core/lyrics';
 
 const ids = (...values: string[]) => {
@@ -36,10 +39,30 @@ describe('lyrics splitting', () => {
     ]);
   });
 
-  it('retains a very long source line for font fitting in the view', () => {
-    const longLine = 'Pag-ibig '.repeat(1_000);
-    expect(splitLyrics(longLine, ids('a'))[0]?.lines[0]).toBe(longLine.trim().slice(0, MAX_LINE_LENGTH));
-    expect(splitLyrics(longLine, ids('a'))[0]?.lines[0]).toHaveLength(MAX_LINE_LENGTH);
+  it('wraps long source lines at word boundaries without losing words', () => {
+    const longLine = 'Pag-ibig '.repeat(1_000).trim();
+    expect(normalizeLyricLines(longLine)).toEqual([longLine]);
+
+    const wrapped = wrapLyricLines([longLine], 100, (text) => text.length * 5);
+    expect(wrapped.unbreakableWordCount).toBe(0);
+    expect(wrapped.lines.length).toBeGreaterThan(1);
+    expect(wrapped.lines.every((line) => line.length <= MAX_LINE_LENGTH)).toBe(true);
+    expect(wrapped.lines.join(' ')).toBe(longLine);
+    expect(wrapped.lines.every((line) => line.length * 5 <= 100)).toBe(true);
+  });
+
+  it('rejects unbreakable words rather than guessing or truncating', () => {
+    const unbreakable = 'H'.repeat(MAX_LINE_LENGTH + 1);
+    expect(normalizeLyricLines(`Readable words\n${unbreakable}`)).toEqual(['Readable words', unbreakable]);
+    expect(wrapLyricLines(['Readable words', unbreakable], 100, (text) => text.length * 2)).toEqual({
+      lines: [],
+      unbreakableWordCount: 1,
+    });
+  });
+
+  it('keeps slide creation within the existing deck limit', () => {
+    const manyLines = Array.from({ length: MAX_SLIDES * 2 + 2 }, (_, index) => `Line ${index + 1}`).join('\n');
+    expect(splitLyrics(manyLines)).toHaveLength(MAX_SLIDES);
   });
 });
 

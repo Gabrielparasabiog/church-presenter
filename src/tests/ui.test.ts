@@ -13,6 +13,10 @@ const setupDocument = (): HTMLElement => {
     callback(0);
     return 1;
   });
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    font: '',
+    measureText: (text: string) => ({ width: text.length * 10 }),
+  } as unknown as CanvasRenderingContext2D);
   return document.querySelector<HTMLElement>('#root')!;
 };
 
@@ -23,6 +27,7 @@ describe('accessible interactive views', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
     document.body.className = '';
@@ -106,6 +111,45 @@ describe('accessible interactive views', () => {
     expect(document.querySelector<HTMLElement>('#presentation-overlay')!.hidden).toBe(true);
     expect(document.body.classList.contains('is-presenting')).toBe(false);
     expect(JSON.parse(localStorage.getItem(DECK_STORAGE_KEY)!).slides).toHaveLength(2);
+    cleanup();
+  });
+
+  it('flows long lyrics into readable slides while preserving every word', () => {
+    const root = setupDocument();
+    const cleanup = renderLyricsPage(root);
+    const source = document.querySelector<HTMLTextAreaElement>('#lyrics-source')!;
+    source.value = 'Diyos na makapangyarihan Haring kataas-taasan '.repeat(10).trim();
+    document.querySelector<HTMLButtonElement>('#generate-slides')!.click();
+
+    const savedDeck = JSON.parse(localStorage.getItem(DECK_STORAGE_KEY)!);
+    const generatedLines = savedDeck.slides.flatMap((slide: { lines: string[] }) => slide.lines);
+    expect(savedDeck.slides.length).toBeGreaterThan(1);
+    expect(savedDeck.slides.every((slide: { lines: string[] }) => slide.lines.length <= 2)).toBe(true);
+    expect(generatedLines.join(' ')).toBe(source.value.split(/\s+/u).join(' '));
+    const safeWidth = Math.max(320, window.innerWidth - 48) * 0.86 - 32;
+    expect(generatedLines.every((line: string) => line.length * 10 <= safeWidth)).toBe(true);
+    expect(document.querySelector('#deck-status')?.textContent).toContain('split at word boundaries');
+    cleanup();
+  });
+
+  it('preserves the current deck and pasted source when an unspaced word cannot fit', () => {
+    const root = setupDocument();
+    const cleanup = renderLyricsPage(root);
+    const source = document.querySelector<HTMLTextAreaElement>('#lyrics-source')!;
+    source.value = 'First line\nSecond line';
+    document.querySelector<HTMLButtonElement>('#generate-slides')!.click();
+    const originalSlides = JSON.parse(localStorage.getItem(DECK_STORAGE_KEY)!).slides;
+
+    const unspaced = 'H'.repeat(5_001);
+    source.value = unspaced;
+    source.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector<HTMLButtonElement>('#generate-slides')!.click();
+
+    const savedDeck = JSON.parse(localStorage.getItem(DECK_STORAGE_KEY)!);
+    expect(savedDeck.sourceText).toBe(unspaced);
+    expect(savedDeck.slides).toEqual(originalSlides);
+    expect(document.querySelector('#deck-status')?.textContent).toContain('long unspaced word');
+    expect(document.querySelector('#deck-status')?.textContent).toContain('current slides were not changed');
     cleanup();
   });
 

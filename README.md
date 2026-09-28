@@ -27,7 +27,7 @@ The countdown uses an absolute target time, so switching tabs or a delayed scree
 ### Lyrics presenter
 
 1. Open **Lyrics** and paste the complete song.
-2. Select **Generate two-line slides**. Blank lines are ignored and every two non-empty source lines become one slide.
+2. Select **Generate two-line slides**. Blank lines are ignored; long source lines are split at spaces into additional slides so each lyric row stays readable. Keep spaces between words—an unbroken word that cannot fit is preserved in the source and reported instead of being silently cut off.
 3. Edit either line, reorder slides, split or merge one-line slides, and choose optional per-slide backgrounds.
 4. Double-click the large preview or select **Present fullscreen**.
 

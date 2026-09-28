@@ -10,8 +10,54 @@ export function normalizeLyricLines(source: string): string[] {
   return source
     .replace(/\r\n?/g, '\n')
     .split('\n')
-    .map((line) => line.trim().slice(0, MAX_LINE_LENGTH))
+    .map((line) => line.trim())
     .filter(Boolean);
+}
+
+export interface LyricWrapResult {
+  lines: string[];
+  unbreakableWordCount: number;
+}
+
+export function wrapLyricLines(
+  lines: readonly string[],
+  maxWidth: number,
+  measureText: (text: string) => number,
+): LyricWrapResult {
+  if (!Number.isFinite(maxWidth) || maxWidth <= 0) return { lines: [], unbreakableWordCount: 0 };
+
+  const wrappedLines: string[] = [];
+  let unbreakableWordCount = 0;
+
+  for (const line of lines) {
+    let current = '';
+    for (const word of line.trim().split(/\s+/u).filter(Boolean)) {
+      if (word.length > MAX_LINE_LENGTH) {
+        unbreakableWordCount++;
+        continue;
+      }
+      const wordWidth = measureText(word);
+      if (!Number.isFinite(wordWidth) || wordWidth > maxWidth) {
+        unbreakableWordCount++;
+        continue;
+      }
+
+      const candidate = current ? `${current} ${word}` : word;
+      const exceedsLineLimit = Boolean(current && candidate.length > MAX_LINE_LENGTH);
+      const candidateWidth = exceedsLineLimit ? Number.POSITIVE_INFINITY : measureText(candidate);
+      if (current && (exceedsLineLimit || !Number.isFinite(candidateWidth) || candidateWidth > maxWidth)) {
+        wrappedLines.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current) wrappedLines.push(current);
+  }
+
+  return unbreakableWordCount > 0
+    ? { lines: [], unbreakableWordCount }
+    : { lines: wrappedLines, unbreakableWordCount: 0 };
 }
 
 export function splitLyrics(source: string, idFactory: () => string = newId): LyricSlide[] {
