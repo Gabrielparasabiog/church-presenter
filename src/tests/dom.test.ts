@@ -53,4 +53,24 @@ describe('strict two-line font fitting', () => {
 
     expect(element.style.fontSize).toBe('50px');
   });
+
+  it('uses unitless line-height as a multiplier when fitting a short lyric band', () => {
+    const element = document.createElement('div');
+    element.style.padding = '0';
+    element.style.fontFamily = 'sans-serif';
+    element.style.fontSize = '100px';
+    element.style.lineHeight = '1.08';
+    element.innerHTML = '<span>First line</span><span>Second line</span>';
+    Object.defineProperty(element, 'clientWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(element, 'clientHeight', { configurable: true, value: 80 });
+    document.body.append(element);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      font: '',
+      measureText: (text: string) => ({ width: text.length * 2 }),
+    } as unknown as CanvasRenderingContext2D);
+
+    fitText(element, 100, 8);
+
+    expect(element.style.fontSize).toBe('37px');
+  });
 });

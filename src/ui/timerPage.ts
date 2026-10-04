@@ -120,6 +120,14 @@ export function renderTimerPage(root: HTMLElement): PageCleanup {
   const onTheme = (): void => { syncSettings(); render(); };
   const onFullscreen = (): void => { void toggleFullscreen(stage).catch(() => undefined); };
   const onFullscreenChange = (): void => { fullscreen.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen'; };
+  const onVisibilityChange = (): void => {
+    if (document.visibilityState !== 'visible' || state.phase !== 'running') return;
+    const next = tickTimer(state, Date.now());
+    if (next === state) return;
+    state = next;
+    render();
+    if (state.phase === 'complete') void wakeLock.stop();
+  };
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.repeat || isEditableTarget(event.target)) return;
     const key = event.key.toLowerCase();
@@ -150,6 +158,7 @@ export function renderTimerPage(root: HTMLElement): PageCleanup {
   stage.addEventListener('dblclick', onFullscreen);
   document.addEventListener('keydown', onKeyDown);
   document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('visibilitychange', onVisibilityChange);
   [hours, minutes, seconds].forEach((input) => input.addEventListener('change', onInput));
   theme.addEventListener('change', onTheme);
   render();
@@ -161,6 +170,7 @@ export function renderTimerPage(root: HTMLElement): PageCleanup {
     fullscreen.removeEventListener('click', onFullscreen);
     document.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('fullscreenchange', onFullscreenChange);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
     wakeLock.destroy();
   };
 }

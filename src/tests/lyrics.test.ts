@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   deleteSlide,
   duplicateSlide,
-  effectiveTheme,
   mergeWithNext,
   moveSlide,
   navigationIndex,
@@ -14,6 +13,7 @@ import {
   updateSlideLines,
   wrapLyricLines,
 } from '../core/lyrics';
+import { CHURCH_BACKGROUNDS, contrastingTextColor, defaultLyricStyle, effectiveLyricStyle } from '../core/lyricStyle';
 
 const ids = (...values: string[]) => {
   let index = 0;
@@ -87,9 +87,22 @@ describe('slide editing', () => {
     expect(mergeWithNext(base, 0)).toBe(base);
   });
 
-  it('inherits deck theme unless a slide has an override', () => {
-    expect(effectiveTheme(base[0]!, 'black')).toBe('black');
-    expect(effectiveTheme({ ...base[0]!, themeOverride: 'white' }, 'black')).toBe('white');
+  it('inherits the deck lyric view unless a slide has an override', () => {
+    const deckStyle = { ...defaultLyricStyle(), view: 'dark-church' as const, backgroundId: 'blue-window' as const };
+    expect(effectiveLyricStyle(base[0]!, deckStyle)).toBe(deckStyle);
+    const override = { ...defaultLyricStyle(), view: 'lower-third' as const };
+    expect(effectiveLyricStyle({ ...base[0]!, styleOverride: override }, deckStyle)).toBe(override);
+  });
+});
+
+describe('lyric view options', () => {
+  it('bundles ten distinct church backdrops and chooses contrasting text colors', () => {
+    expect(CHURCH_BACKGROUNDS).toHaveLength(10);
+    expect(new Set(CHURCH_BACKGROUNDS.map(({ id }) => id)).size).toBe(10);
+    expect(new Set(CHURCH_BACKGROUNDS.map(({ file }) => file)).size).toBe(10);
+    expect(contrastingTextColor('#00ff57')).toBe('#101713');
+    expect(contrastingTextColor('#f5f5f5')).toBe('#101713');
+    expect(contrastingTextColor('#101010')).toBe('#ffffff');
   });
 });
 

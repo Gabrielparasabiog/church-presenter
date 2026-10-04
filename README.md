@@ -22,14 +22,15 @@ Keyboard controls work when a form field is not focused:
 - `R` — reset
 - `F` — enter or exit fullscreen
 
-The countdown uses an absolute target time, so switching tabs or a delayed screen refresh does not make it drift. It remains at `00:00` until the operator starts the next loop.
+The countdown uses an absolute target time, so switching tabs or a delayed screen refresh does not make it drift. When you return to the Timer tab, the display immediately catches up—including reaching `00:00` if time expired while hidden. Keep the Timer page open for the countdown to continue; it does not run after navigating away or refreshing. It remains at `00:00` until the operator starts the next loop.
 
 ### Lyrics presenter
 
 1. Open **Lyrics** and paste the complete song.
 2. Select **Generate two-line slides**. Blank lines are ignored; long source lines are split at spaces into additional slides so each lyric row stays readable. Keep spaces between words—an unbroken word that cannot fit is preserved in the source and reported instead of being silently cut off.
-3. Edit either line, reorder slides, split or merge one-line slides, and choose optional per-slide backgrounds.
-4. Double-click the large preview or select **Present fullscreen**.
+3. Preview the current slide in all four views together: **Black & White**, **Custom Color** (chroma green by default, with automatic text contrast), **Dark 3D Church** (10 bundled sanctuary scenes), and **Lower Third**. The four quick choices directly above the previews select the view used for presentation; each slide can follow the deck default or use its own view and background.
+4. Edit either line, reorder slides, split or merge one-line slides.
+5. Double-click the large preview or select **Present fullscreen**.
 
 Each source line is kept on one visual row. The text automatically shrinks when needed, so a slide never wraps into three or four displayed lines.
 
@@ -45,7 +46,9 @@ Decks autosave locally. **Export JSON** creates a portable backup, and **Import 
 
 ## Offline behavior
 
-After the first successful visit, the application shell, fonts, icons, and code are cached by its service worker. The timer, lyrics editor, saved deck, and presentation controls then work without a network connection. A small notification appears when the application is ready offline or when a new version is available.
+After the first successful visit, the application shell, fonts, icons, code, and all 10 church backgrounds are cached by its service worker. The timer, lyrics editor, saved deck, and presentation controls then work without a network connection. A small notification appears when the application is ready offline or when a new version is available.
+
+Existing version-one JSON exports and locally saved decks remain importable. Original white-theme slides keep their white appearance; new decks default to the Custom Color view.
 
 ## Local development
 

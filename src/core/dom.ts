@@ -45,7 +45,10 @@ export function fitText(element: HTMLElement, maxPx = 92, minPx = 24): void {
 
   const currentFontSize = Number.parseFloat(styles.fontSize) || maxPx;
   const computedLineHeight = Number.parseFloat(styles.lineHeight);
-  const lineHeightRatio = Number.isFinite(computedLineHeight) ? computedLineHeight / currentFontSize : 1.15;
+  const lineHeightIsUnitless = /^\s*\d*\.?\d+\s*$/u.test(styles.lineHeight);
+  const lineHeightRatio = Number.isFinite(computedLineHeight)
+    ? (lineHeightIsUnitless ? computedLineHeight : computedLineHeight / currentFontSize)
+    : 1.15;
   const heightLimit = availableHeight / (lines.length * Math.max(1, lineHeightRatio));
   let best = Math.max(minPx, Math.min(maxPx, Math.floor(widthLimit), Math.floor(heightLimit)));
   element.style.fontSize = `${best}px`;

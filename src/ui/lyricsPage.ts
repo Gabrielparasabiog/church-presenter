@@ -3,7 +3,6 @@ import {
   MAX_SLIDES,
   deleteSlide,
   duplicateSlide,
-  effectiveTheme,
   mergeWithNext,
   moveSlide,
   navigationIndex,
@@ -15,8 +14,76 @@ import {
 } from '../core/lyrics';
 import { MAX_IMPORT_BYTES, createEmptyDeck, loadDeck, parseDeckImport, saveDeck, serializeDeck } from '../core/storage';
 import { ScreenWakeLock } from '../core/wakeLock';
-import type { LyricDeck, ThemeName } from '../types';
-import { pageShell, themeOptions, type PageCleanup } from './shell';
+import { CHURCH_BACKGROUNDS, LYRIC_VIEWS, churchBackgroundFile, contrastingTextColor, effectiveLyricStyle } from '../core/lyricStyle';
+import type { LyricDeck, LyricStyle, LyricView } from '../types';
+import { pageShell, type PageCleanup } from './shell';
+
+function viewPickerMarkup(activeStyle: LyricStyle): string {
+  const base = import.meta.env.BASE_URL;
+  const choices = LYRIC_VIEWS.map(({ id, label, description }) => {
+    const previewStyle = `--preview-color:${activeStyle.color};--preview-image:url("${base}church-backgrounds/${churchBackgroundFile(activeStyle.backgroundId)}")`;
+    return `<button class="view-choice" type="button" data-view="${id}" data-scope="deck" aria-pressed="${activeStyle.view === id}" style="${previewStyle}">
+      <span class="view-choice-preview preview-${id}" aria-hidden="true"><i></i><i></i></span>
+      <span><strong>${label}</strong><small>${description}</small></span>
+    </button>`;
+  }).join('');
+  return `<div class="view-choice-grid" role="group" aria-label="Choose a default lyric view">${choices}</div>`;
+}
+
+function stageViewPickerMarkup(style: LyricStyle): string {
+  const base = import.meta.env.BASE_URL;
+  const choices = LYRIC_VIEWS.map(({ id, label, description }) => {
+    const previewStyle = `--preview-color:${style.color};--preview-image:url("${base}church-backgrounds/${churchBackgroundFile(style.backgroundId)}")`;
+    return `<button class="stage-view-choice" type="button" data-view="${id}" aria-pressed="${style.view === id}" style="${previewStyle}" aria-label="${label}: ${description}">
+      <span class="view-choice-preview preview-${id}" aria-hidden="true"><i></i><i></i></span>
+      <span>${label}</span>
+    </button>`;
+  }).join('');
+  return `<div class="stage-view-picker">
+    <span class="stage-view-heading">Slide view</span>
+    <div class="stage-view-grid" role="group" aria-label="Choose a view for the current slide">${choices}</div>
+  </div>`;
+}
+
+function editorViewPreviewMarkup(slide: LyricDeck['slides'][number], activeStyle: LyricStyle): string {
+  const previews = LYRIC_VIEWS.map(({ id, label }) => {
+    const lyrics = slide.lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('');
+    return `<div class="view-preview${activeStyle.view === id ? ' is-current-view' : ''}" data-preview-view="${id}" role="img" aria-label="${label} preview: ${escapeHtml(slide.lines.join('. '))}">
+      <div class="view-preview-copy">${lyrics}</div>
+    </div>`;
+  }).join('');
+  return previews;
+}
+
+function styleSettingsMarkup(style: LyricStyle, scope: 'deck' | 'slide', inherited = false): string {
+  if (inherited) {
+    return `<p class="helper-text">This slide follows the deck default. Change its view above to customize this slide only.</p>`;
+  }
+  if (style.view === 'custom-color') {
+    return `<label class="select-label" for="${scope}-appearance-color">Background color</label>
+      <div class="color-picker-row"><input id="${scope}-appearance-color" data-custom-color="${scope}" type="color" value="${style.color}" /><span>${style.color.toUpperCase()} · text contrast adjusts automatically</span></div>`;
+  }
+  if (style.view === 'dark-church') {
+    const base = import.meta.env.BASE_URL;
+    const choices = CHURCH_BACKGROUNDS.map(({ id, label, file }) => `<button class="background-choice" type="button" data-background-id="${id}" data-scope="${scope}" aria-pressed="${style.backgroundId === id}" aria-label="${label}" title="${label}" style="--background-preview:url('${base}church-backgrounds/${file}')"><span>${label}</span></button>`).join('');
+    return `<p class="select-label">Choose a sanctuary</p><div class="background-choice-grid" role="group" aria-label="Choose a church background">${choices}</div>`;
+  }
+  if (style.view === 'legacy-white') {
+    return `<p class="helper-text">This slide keeps its original white background from an older deck. Choose one of the four views above to change it.</p>`;
+  }
+  if (style.view === 'lower-third') {
+    return `<p class="helper-text">Lyrics sit in a centered black band near the bottom of a clean white screen.</p>`;
+  }
+  return `<p class="helper-text">White lyrics on a black background—ready for a dark room.</p>`;
+}
+
+function applyLyricStyle(element: HTMLElement, style: LyricStyle): void {
+  element.classList.remove('lyric-view-black-white', 'lyric-view-custom-color', 'lyric-view-dark-church', 'lyric-view-lower-third', 'lyric-view-legacy-white');
+  element.classList.add(`lyric-view-${style.view}`);
+  element.style.setProperty('--lyric-background', style.color);
+  element.style.setProperty('--lyric-foreground', contrastingTextColor(style.color));
+  element.style.setProperty('--church-image', `url("${import.meta.env.BASE_URL}church-backgrounds/${churchBackgroundFile(style.backgroundId)}")`);
+}
 
 export function renderLyricsPage(root: HTMLElement): PageCleanup {
   let deck: LyricDeck = loadDeck();
@@ -55,9 +122,10 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
             <button id="generate-slides" class="button button-primary" type="button">Generate two-line slides</button>
           </div>
           <div class="source-divider"></div>
-          <div>
-            <label class="select-label" for="deck-theme">Default deck background</label>
-            <select id="deck-theme">${themeOptions(deck.defaultTheme)}</select>
+          <div class="appearance-settings">
+            <p class="select-label">Default lyric view</p>
+            <div id="deck-view-options"></div>
+            <div id="deck-view-settings"></div>
           </div>
         </aside>
 
@@ -66,8 +134,9 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
             <div><span class="live-dot"></span><span id="slide-position">Slide 0 of 0</span></div>
             <button id="present-deck" class="button button-gold" type="button" ${deck.slides.length ? '' : 'disabled'}>Present fullscreen</button>
           </div>
-          <div id="editor-canvas" class="editor-canvas theme-green" tabindex="0" aria-label="Current lyric slide; double click to present">
-            <div id="editor-slide-copy" class="slide-copy"></div>
+          <div id="stage-view-options" hidden></div>
+          <div id="editor-canvas" class="editor-canvas" tabindex="0" aria-label="Four views of the current lyric slide; double click to present the selected view">
+            <div id="editor-view-previews" class="editor-view-previews" role="group" aria-label="All four views of the current slide" hidden></div>
             <p id="empty-slide-message" class="empty-slide-message">Paste lyrics and generate your first deck.</p>
           </div>
           <div class="thumbnail-header"><span>Slides</span><span>← / → change slide · Double-click to present</span></div>
@@ -82,8 +151,10 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
             <textarea id="slide-line-one" rows="3"></textarea>
             <label for="slide-line-two">Line two <span>(optional)</span></label>
             <textarea id="slide-line-two" rows="3"></textarea>
-            <label class="select-label" for="slide-theme">Slide background</label>
-            <select id="slide-theme"></select>
+            <div class="appearance-settings">
+              <p class="select-label">Per-slide appearance</p>
+              <div id="slide-view-settings"></div>
+            </div>
             <div class="slide-actions">
               <button id="slide-up" type="button" title="Move slide left" aria-label="Move slide left">←</button>
               <button id="slide-down" type="button" title="Move slide right" aria-label="Move slide right">→</button>
@@ -98,7 +169,7 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
       <p id="deck-status" class="status-message" role="status" aria-live="polite"></p>
     </section>
     <section id="presentation-overlay" class="presentation-overlay" hidden aria-label="Lyrics presentation">
-      <div id="presentation-stage" class="presentation-stage theme-green" tabindex="-1">
+      <div id="presentation-stage" class="presentation-stage" tabindex="-1">
         <button id="presentation-previous" class="presentation-zone previous" type="button" aria-label="Previous slide"></button>
         <div id="presentation-copy" class="presentation-copy"></div>
         <button id="presentation-next" class="presentation-zone next" type="button" aria-label="Next slide"></button>
@@ -113,10 +184,13 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
 
   const title = byId<HTMLInputElement>('deck-title');
   const source = byId<HTMLTextAreaElement>('lyrics-source');
-  const deckTheme = byId<HTMLSelectElement>('deck-theme');
+  const deckViewOptions = byId<HTMLDivElement>('deck-view-options');
+  const deckViewSettings = byId<HTMLDivElement>('deck-view-settings');
+  const slideViewSettings = byId<HTMLDivElement>('slide-view-settings');
+  const stageViewOptions = byId<HTMLDivElement>('stage-view-options');
+  const editorViewPreviews = byId<HTMLDivElement>('editor-view-previews');
   const generate = byId<HTMLButtonElement>('generate-slides');
   const canvas = byId<HTMLDivElement>('editor-canvas');
-  const canvasCopy = byId<HTMLDivElement>('editor-slide-copy');
   const emptyMessage = byId<HTMLParagraphElement>('empty-slide-message');
   const slidePosition = byId<HTMLSpanElement>('slide-position');
   const thumbnails = byId<HTMLDivElement>('thumbnail-strip');
@@ -125,7 +199,6 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
   const editorFields = byId<HTMLDivElement>('slide-editor-fields');
   const lineOne = byId<HTMLTextAreaElement>('slide-line-one');
   const lineTwo = byId<HTMLTextAreaElement>('slide-line-two');
-  const slideTheme = byId<HTMLSelectElement>('slide-theme');
   const status = byId<HTMLParagraphElement>('deck-status');
   const overlay = byId<HTMLElement>('presentation-overlay');
   const presentationStage = byId<HTMLDivElement>('presentation-stage');
@@ -134,13 +207,27 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
   const presentationStatus = byId<HTMLParagraphElement>('presentation-status');
 
   const currentSlide = () => deck.slides[deck.currentIndex];
+  const fitLyricCopy = (element: HTMLElement, stage: HTMLElement, style: LyricStyle, maxPx: number, minPx: number): void => {
+    const lowerThirdCap = style.view === 'lower-third' && stage.clientHeight > 0
+      ? Math.max(14, Math.floor(stage.clientHeight * 0.046))
+      : maxPx;
+    fitText(element, Math.min(maxPx, lowerThirdCap), minPx);
+  };
   const fitEditorCopy = (): void => {
-    if (!currentSlide()) return;
-    fitText(canvasCopy, 54, 8);
+    const slide = currentSlide();
+    if (!slide) return;
+    const activeStyle = effectiveLyricStyle(slide, deck.defaultStyle);
+    editorViewPreviews.querySelectorAll<HTMLElement>('[data-preview-view]').forEach((preview) => {
+      const view = preview.dataset.previewView as LyricView | undefined;
+      const copy = preview.querySelector<HTMLElement>('.view-preview-copy');
+      if (!view || !copy) return;
+      fitLyricCopy(copy, preview, { ...activeStyle, view }, 54, 4);
+    });
   };
   const fitPresentationCopy = (): void => {
-    if (!currentSlide()) return;
-    fitText(presentationCopy, 112, 16);
+    const slide = currentSlide();
+    if (!slide) return;
+    fitLyricCopy(presentationCopy, presentationStage, effectiveLyricStyle(slide, deck.defaultStyle), 112, 12);
   };
   const getLyricsWrapMetrics = (): { maxWidth: number; measureText: (text: string) => number } | null => {
     const canvasWidth = canvas.clientWidth || canvas.getBoundingClientRect().width || Math.max(320, window.innerWidth - 48);
@@ -148,10 +235,10 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     if (maxWidth <= 0) return null;
 
     const fontSize = 54;
-    const styles = window.getComputedStyle(canvasCopy);
+    const styles = window.getComputedStyle(canvas);
     const context = document.createElement('canvas').getContext('2d');
     if (context) {
-      context.font = `${styles.fontStyle} ${styles.fontWeight} ${fontSize}px ${styles.fontFamily}`;
+      context.font = `${styles.fontStyle} 700 ${fontSize}px ${styles.fontFamily}`;
       return { maxWidth, measureText: (text) => context.measureText(text).width };
     }
     return { maxWidth, measureText: (text) => text.length * fontSize * 0.58 };
@@ -178,12 +265,14 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
   const renderPresentation = (): void => {
     const slide = currentSlide();
     if (!slide) return;
-    presentationStage.className = `presentation-stage theme-${effectiveTheme(slide, deck.defaultTheme)}${isBlanked ? ' is-blank' : ''}`;
+    presentationStage.className = `presentation-stage${isBlanked ? ' is-blank' : ''}`;
+    applyLyricStyle(presentationStage, effectiveLyricStyle(slide, deck.defaultStyle));
     presentationCopy.innerHTML = slide.lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('');
     presentationCounter.textContent = `${deck.currentIndex + 1} / ${deck.slides.length}`;
     presentationStatus.textContent = isBlanked
       ? 'Projection is blacked out.'
       : `Slide ${deck.currentIndex + 1} of ${deck.slides.length}: ${slide.lines.join('. ')}`;
+    fitPresentationCopy();
     fitAfterFonts(fitPresentationCopy);
   };
 
@@ -191,17 +280,28 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     deck.currentIndex = Math.max(0, Math.min(deck.currentIndex, Math.max(0, deck.slides.length - 1)));
     const slide = currentSlide();
     title.value = deck.title;
-    deckTheme.value = deck.defaultTheme;
+    const style = slide ? effectiveLyricStyle(slide, deck.defaultStyle) : deck.defaultStyle;
+    const inheritsDeckStyle = Boolean(slide && slide.styleOverride === null);
+    deckViewOptions.innerHTML = viewPickerMarkup(deck.defaultStyle);
+    deckViewSettings.innerHTML = styleSettingsMarkup(deck.defaultStyle, 'deck');
+    stageViewOptions.hidden = !slide;
+    stageViewOptions.innerHTML = slide ? stageViewPickerMarkup(style) : '';
+    const useDeckDefault = slide && !inheritsDeckStyle
+      ? '<button class="button button-quiet slide-default-button" type="button" data-use-default>Use deck default</button>'
+      : '';
+    slideViewSettings.innerHTML = slide ? `${useDeckDefault}${styleSettingsMarkup(style, 'slide', inheritsDeckStyle)}` : '';
     slidePosition.textContent = `Slide ${slide ? deck.currentIndex + 1 : 0} of ${deck.slides.length}`;
     present.disabled = !deck.slides.length;
     emptyMessage.hidden = Boolean(slide);
-    canvasCopy.hidden = !slide;
-    canvas.className = `editor-canvas theme-${slide ? effectiveTheme(slide, deck.defaultTheme) : deck.defaultTheme}`;
+    editorViewPreviews.hidden = !slide;
     if (slide) {
-      canvasCopy.innerHTML = slide.lines.map((line) => `<span>${escapeHtml(line)}</span>`).join('');
+      editorViewPreviews.innerHTML = editorViewPreviewMarkup(slide, style);
+      editorViewPreviews.querySelectorAll<HTMLElement>('[data-preview-view]').forEach((preview) => {
+        const view = preview.dataset.previewView as LyricView | undefined;
+        if (view) applyLyricStyle(preview, { ...style, view });
+      });
       lineOne.value = slide.lines[0];
       lineTwo.value = slide.lines[1] ?? '';
-      slideTheme.innerHTML = themeOptions(slide.themeOverride ?? 'inherit', true);
       editorEmpty.hidden = true;
       editorFields.hidden = false;
       byId<HTMLButtonElement>('slide-up').disabled = deck.currentIndex === 0;
@@ -209,16 +309,21 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
       byId<HTMLButtonElement>('slide-split').disabled = slide.lines.length !== 2;
       const next = deck.slides[deck.currentIndex + 1];
       byId<HTMLButtonElement>('slide-merge').disabled = slide.lines.length !== 1 || !next || next.lines.length !== 1;
+      fitEditorCopy();
       fitAfterFonts(fitEditorCopy);
     } else {
       editorEmpty.hidden = false;
       editorFields.hidden = true;
     }
     thumbnails.innerHTML = deck.slides.map((item, index) => `
-      <button class="thumbnail ${index === deck.currentIndex ? 'is-selected' : ''} theme-${effectiveTheme(item, deck.defaultTheme)}" type="button" role="option" aria-selected="${index === deck.currentIndex}" data-slide-index="${index}">
+      <button class="thumbnail ${index === deck.currentIndex ? 'is-selected' : ''}" type="button" role="option" aria-selected="${index === deck.currentIndex}" data-slide-index="${index}">
         <span class="thumbnail-number">${index + 1}</span>
         <span class="thumbnail-copy">${item.lines.map((line) => `<span title="${escapeHtml(line)}">${escapeHtml(line)}</span>`).join('')}</span>
       </button>`).join('');
+    thumbnails.querySelectorAll<HTMLButtonElement>('.thumbnail').forEach((thumbnail, index) => {
+      const item = deck.slides[index];
+      if (item) applyLyricStyle(thumbnail, effectiveLyricStyle(item, deck.defaultStyle));
+    });
     if (isPresenting) renderPresentation();
   };
 
@@ -318,7 +423,8 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
       return;
     }
     if (event.key === 'Escape') {
-      if (!document.fullscreenElement) stopPresentation();
+      event.preventDefault();
+      stopPresentation();
       return;
     }
     if (isEditableTarget(event.target)) return;
@@ -333,8 +439,7 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     }
   };
   const onFullscreenChange = (): void => {
-    if (isPresenting && !document.fullscreenElement) stopPresentation();
-    else if (isPresenting) fitAfterFonts(fitPresentationCopy);
+    if (isPresenting) fitAfterFonts(fitPresentationCopy);
   };
   const onResize = (): void => {
     if (isPresenting) fitPresentationCopy();
@@ -352,14 +457,64 @@ export function renderLyricsPage(root: HTMLElement): PageCleanup {
     window.clearTimeout(sourceSaveTimerId);
     sourceSaveTimerId = window.setTimeout(persist, 250);
   });
-  deckTheme.addEventListener('change', () => { deck.defaultTheme = deckTheme.value as ThemeName; persist(); render(); });
+  const onViewChoice = (event: Event, scope: 'deck' | 'slide'): void => {
+    const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>('[data-view], [data-use-default]') : null;
+    if (!target) return;
+    if (scope === 'deck') {
+      const view = target.dataset.view as LyricView | undefined;
+      if (!view || !LYRIC_VIEWS.some((choice) => choice.id === view)) return;
+      deck.defaultStyle = { ...deck.defaultStyle, view };
+    } else {
+      const slide = currentSlide();
+      if (!slide) return;
+      const view = target.dataset.view as LyricView | undefined;
+      if (!view || !LYRIC_VIEWS.some((choice) => choice.id === view)) return;
+      slide.styleOverride = { ...effectiveLyricStyle(slide, deck.defaultStyle), view };
+    }
+    persist();
+    render();
+  };
+  const onBackgroundChoice = (event: Event, scope: 'deck' | 'slide'): void => {
+    const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>('[data-background-id]') : null;
+    const backgroundId = target?.dataset.backgroundId;
+    if (!backgroundId || !CHURCH_BACKGROUNDS.some((background) => background.id === backgroundId)) return;
+    if (scope === 'deck') deck.defaultStyle = { ...deck.defaultStyle, backgroundId: backgroundId as LyricStyle['backgroundId'] };
+    else {
+      const slide = currentSlide();
+      if (!slide) return;
+      slide.styleOverride = { ...effectiveLyricStyle(slide, deck.defaultStyle), backgroundId: backgroundId as LyricStyle['backgroundId'] };
+    }
+    persist();
+    render();
+  };
+  const onCustomColor = (event: Event, scope: 'deck' | 'slide'): void => {
+    const input = event.target instanceof HTMLInputElement && event.target.dataset.customColor === scope ? event.target : null;
+    if (!input || !/^#[\da-f]{6}$/iu.test(input.value)) return;
+    if (scope === 'deck') deck.defaultStyle = { ...deck.defaultStyle, color: input.value.toLowerCase() };
+    else {
+      const slide = currentSlide();
+      if (!slide) return;
+      slide.styleOverride = { ...effectiveLyricStyle(slide, deck.defaultStyle), color: input.value.toLowerCase() };
+    }
+    persist();
+    render();
+  };
+  deckViewOptions.addEventListener('click', (event) => onViewChoice(event, 'deck'));
+  stageViewOptions.addEventListener('click', (event) => onViewChoice(event, 'slide'));
+  slideViewSettings.addEventListener('click', (event) => {
+    const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>('[data-use-default]') : null;
+    const slide = currentSlide();
+    if (!target || !slide) return;
+    slide.styleOverride = null;
+    persist();
+    render();
+  });
+  deckViewSettings.addEventListener('click', (event) => onBackgroundChoice(event, 'deck'));
+  slideViewSettings.addEventListener('click', (event) => onBackgroundChoice(event, 'slide'));
+  deckViewSettings.addEventListener('change', (event) => onCustomColor(event, 'deck'));
+  slideViewSettings.addEventListener('change', (event) => onCustomColor(event, 'slide'));
   lineOne.addEventListener('input', updateCurrent);
   lineTwo.addEventListener('input', updateCurrent);
-  slideTheme.addEventListener('change', () => {
-    const slide = currentSlide(); if (!slide) return;
-    slide.themeOverride = slideTheme.value === 'inherit' ? null : slideTheme.value as ThemeName;
-    persist(); render();
-  });
   byId<HTMLButtonElement>('slide-up').addEventListener('click', () => { deck.slides = moveSlide(deck.slides, deck.currentIndex, -1); deck.currentIndex--; persist(); render(); });
   byId<HTMLButtonElement>('slide-down').addEventListener('click', () => { deck.slides = moveSlide(deck.slides, deck.currentIndex, 1); deck.currentIndex++; persist(); render(); });
   byId<HTMLButtonElement>('slide-duplicate').addEventListener('click', () => { deck.slides = duplicateSlide(deck.slides, deck.currentIndex); deck.currentIndex++; persist(); render(); });

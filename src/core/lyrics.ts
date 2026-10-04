@@ -1,4 +1,4 @@
-import type { LyricSlide, ThemeName } from '../types';
+import type { LyricSlide } from '../types';
 
 export const MAX_SLIDES = 500;
 export const MAX_LINE_LENGTH = 5_000;
@@ -70,7 +70,7 @@ export function splitLyrics(source: string, idFactory: () => string = newId): Ly
     slides.push({
       id: idFactory(),
       lines: second === undefined ? [first] : [first, second],
-      themeOverride: null,
+      styleOverride: null,
     });
   }
   return slides;
@@ -133,10 +133,6 @@ export function mergeWithNext(slides: LyricSlide[], index: number): LyricSlide[]
   const copy = [...slides];
   copy.splice(index, 2, { ...current, lines: [current.lines[0], next.lines[0]] });
   return copy;
-}
-
-export function effectiveTheme(slide: LyricSlide, deckTheme: ThemeName): ThemeName {
-  return slide.themeOverride ?? deckTheme;
 }
 
 export function navigationIndex(key: string, index: number, slideCount: number): number {
